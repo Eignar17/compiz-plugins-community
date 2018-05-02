@@ -5,7 +5,7 @@
         <category>Sound</category>
         <deps>
                 <relation type="before">
-                        <plugin>soundeffects</plugin>
+                        <plugin>sound effects</plugin>
                 </relation>
                 <relation type="after">
                         <plugin>sound</plugin>
