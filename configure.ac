@@ -152,10 +152,14 @@ src/lazypointer/Makefile
 src/maze/Makefile
 src/mousegestures/Makefile
 src/newton/Makefile
-src/peek/Makefile
+src/ogg/Makefile
+src/peek/Makefile 
+src/portaudio/Makefile
 src/prompt/Makefile
 src/roach/Makefile
 src/rubik/Makefile
+src/sound/Makefile
+src/soundeffects/Makefile
 src/visualevent/Makefile
 src/wiimote/Makefile
 src/wiitrack/Makefile
