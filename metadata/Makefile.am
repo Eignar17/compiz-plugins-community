@@ -13,6 +13,10 @@ xml_in_files =           \
 	prompt.xml.in        \
 	roach.xml.in         \
 	rubik.xml.in         \
+	sndogg.xml.in        \
+	sndportaudio.xml.in  \
+	sound.xml.in         \
+	soundeffects.xml.in  \
         visualevent.xml.in   \
 	wiimote.xml.in       \
 	wiitrack.xml.in
