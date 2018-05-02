@@ -9,10 +9,14 @@ SUBDIRS =              \
 	maze               \
 	mousegestures      \
 	newton             \
+	ogg                \
 	peek               \
+	portaudio          \
 	prompt             \
 	roach              \
 	rubik              \
+	sound              \
+	soundeffects       \
 	visualevent        \
 	wiimote            \
 	wiitrack
