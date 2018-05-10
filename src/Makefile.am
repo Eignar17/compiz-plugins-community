@@ -11,6 +11,7 @@ SUBDIRS =              \
 	mousegestures      \
 	newton             \
 	peek               \
+	prompt             \
 	roach              \
 	rubik              \
 	wiitrack
