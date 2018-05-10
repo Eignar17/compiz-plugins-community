@@ -129,9 +129,10 @@ PKG_CHECK_MODULES(PANGO, cairo-xlib-xrender pangocairo cairo >= 1.0, [have_pango
 PKG_CHECK_MODULES(XTST, xtst, [have_xtst=yes], [have_xtst=no])
 AM_CONDITIONAL(VISUALEVENT_PLUGIN, test "x$have_pango" = "xyes" && test "x$have_xtst" = "xyes")
 
-PKG_CHECK_MODULES(COMPIZPROMPT, compiz-prompt, [have_compiz_prompt =yes], [have_compiz_prompt=no])
-AM_CONDITIONAL(WIIMOTE_PLUGIN, test "x$have_compiz_prompt" = "xyes")
-
+if test "x$use_visualevent" = "xyes"; then
+  PKG_CHECK_MODULES(VISUALEVENT, [cairo-xlib-xrender pangocairo cairo >= 1.0 xtst], [use_visualevent=yes], [use_visualevent=no])
+fi
+		  
 AC_OUTPUT([
 compiz-visualevent.pc
 Makefile
