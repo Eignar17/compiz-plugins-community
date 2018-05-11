@@ -10,7 +10,7 @@
 - Add mousegestures plugin.
 - Add newton plugin.
 - Add peek plugin.
-- Add prompt plugin.
+- Add prompt plugin.	(master version revert to add wiiremote)
 - Add rubik plugin.
 - Add showrepaint plugin.
 - Add visualevent plugin. (warning:crash random).
