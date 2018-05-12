@@ -49,7 +49,8 @@ typedef struct _WiimoteDisplay
     int screenPrivateIndex;
     
     CompTimeoutHandle removeTextHandle;
-    
+
+    TextFunc *textFunc;    
 } WiimoteDisplay;
 
 typedef struct _WiimoteScreen
@@ -57,10 +58,7 @@ typedef struct _WiimoteScreen
     PaintOutputProc        paintOutput;
     int windowPrivateIndex;
     /* text display support */
-    CompTexture textTexture;
-    Pixmap      textPixmap;
-    int       textWidth;
-    int       textHeight;
+    CompTextData *textData;
     
     Bool title;
 
@@ -87,14 +85,14 @@ static void
 promptFreeTitle (CompScreen *s)
 {
     PROMPT_SCREEN(s);
+    PROMPT_DISPLAY (s->display);
 
-    if (!as->textPixmap)
+    if (!as->textData)
 	return;
 
-    releasePixmapFromTexture (s, &as->textTexture);
-    initTexture (s, &as->textTexture);
-    XFreePixmap (s->display->display, as->textPixmap);
-    as->textPixmap = None;
+    (ad->textFunc->finiTextData) (s, as->textData);
+    as->textData = NULL;
+
     damageScreen (s);
 }
 
@@ -102,10 +100,9 @@ static void
 promptRenderTitle (CompScreen *s, char *stringData)
 {
     CompTextAttrib tA;
-    int            stride;
-    void           *data;
 
     PROMPT_SCREEN (s);
+    PROMPT_DISPLAY (s->display);
 
     //ringFreeWindowTitle (s);
 
@@ -115,44 +112,23 @@ promptRenderTitle (CompScreen *s, char *stringData)
     /* 75% of the output device as maximum width */
     tA.maxWidth = (ox2 - ox1) * 3 / 4;
     tA.maxHeight = 100;
-    tA.screen = s;
+
+    tA.family = "Sans";
     tA.size = promptGetTitleFontSize (s);
     tA.color[0] = promptGetTitleFontColorRed (s);
     tA.color[1] = promptGetTitleFontColorGreen (s);
     tA.color[2] = promptGetTitleFontColorBlue (s);
     tA.color[3] = promptGetTitleFontColorAlpha (s);
-    
-    tA.style = TEXT_STYLE_NORMAL;
-    tA.style |= TEXT_STYLE_BACKGROUND;
-    tA.backgroundHMargin = 10.0f;
-    tA.backgroundVMargin = 10.0f;
-    tA.backgroundColor[0] = promptGetTitleBackColorRed (s);
-    tA.backgroundColor[1] = promptGetTitleBackColorGreen (s);
-    tA.backgroundColor[2] = promptGetTitleBackColorBlue (s);
-    tA.backgroundColor[3] = promptGetTitleBackColorAlpha (s);
-    tA.family = "Sans";
-    tA.ellipsize = FALSE;
+   
+    tA.flags = CompTextFlagWithBackground | CompTextFlagEllipsized;
+    tA.bgHMargin = 10.0f;
+    tA.bgVMargin = 10.0f;
+    tA.bgColor[0] = promptGetTitleBackColorRed (s);
+    tA.bgColor[1] = promptGetTitleBackColorGreen (s);
+    tA.bgColor[2] = promptGetTitleBackColorBlue (s);
+    tA.bgColor[3] = promptGetTitleBackColorAlpha (s);
 
-    tA.renderMode = TextRenderNormal;
-
-    tA.data = (void*)stringData;
-
-    initTexture (s, &as->textTexture);
-
-    if ((*s->display->fileToImage) (s->display, TEXT_ID, (char *)&tA,
-			 	    &as->textWidth, &as->textHeight,
-				    &stride, &data))
-    {
-	as->textPixmap = (Pixmap)data;
-	bindPixmapToTexture (s, &as->textTexture, as->textPixmap,
-			     as->textWidth, as->textHeight, 32);
-    }
-    else 
-    {
-	as->textPixmap = None;
-	as->textWidth  = 0;
-	as->textHeight = 0;
-    }
+    as->textData = (ad->textFunc->renderText) (s, stringData, &tA);
 }
 
 /* Stolen from ring.c */
@@ -161,102 +137,21 @@ static void
 promptDrawTitle (CompScreen *s)
 {
     PROMPT_SCREEN(s);
-    GLboolean wasBlend;
-    GLint oldBlendSrc, oldBlendDst;
+    PROMPT_DISPLAY (s->display);
 
-    float width = as->textWidth;
-    float height = as->textHeight;
+    float width = as->textData->width;
+    float height = as->textData->height;
 
     int ox1, ox2, oy1, oy2;
     getCurrentOutputExtents (s, &ox1, &oy1, &ox2, &oy2);
 
-    float x = ox1 + ((ox2 - ox1) / 2) - (as->textWidth / 2);
-    float y = oy1 + ((oy2 - oy1) / 2) + (height / 2);;
+    float x = ox1 + ((ox2 - ox1) / 2) - (width / 2);
+    float y = oy1 + ((oy2 - oy1) / 2) + (height / 2);
 
     x = floor (x);
     y = floor (y);
 
-    glGetIntegerv (GL_BLEND_SRC, &oldBlendSrc);
-    glGetIntegerv (GL_BLEND_DST, &oldBlendDst);
-    wasBlend = glIsEnabled (GL_BLEND);
-
-    if (!wasBlend)
-	glEnable (GL_BLEND);
-    glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-    glColor4f(0.0f, 0.0f, 0.0f, 0.7f);
-
-    glPushMatrix ();
-/*
-    glTranslatef (x, y - height, 0.0f);
-    glRectf (0.0f, height, width, 0.0f);
-    glRectf (0.0f, 0.0f, width, -border);
-    glRectf (0.0f, height + border, width, height);
-    glRectf (-border, height, 0.0f, 0.0f);
-    glRectf (width, height, width + border, 0.0f);
-    glTranslatef (-border, -border, 0.0f);
-
-#define CORNER(a,b) \
-    for (k = a; k < b; k++) \
-    {\
-	float rad = k * (PI / 180.0f);\
-	glVertex2f (0.0f, 0.0f);\
-	glVertex2f (cos (rad) * border, sin (rad) * border);\
-	glVertex2f (cos ((k - 1) * (PI / 180.0f)) * border, \
-		    sin ((k - 1) * (PI / 180.0f)) * border);\
-    }
-    int k;
-
-    glTranslatef (border, border, 0.0f);
-    glBegin (GL_TRIANGLES);
-    CORNER (180, 270) glEnd ();
-    glTranslatef (-border, -border, 0.0f);
-
-    glTranslatef (width + border, border, 0.0f);
-    glBegin (GL_TRIANGLES);
-    CORNER (270, 360) glEnd ();
-    glTranslatef (-(width + border), -border, 0.0f);
-
-    glTranslatef (border, height + border, 0.0f);
-    glBegin (GL_TRIANGLES);
-    CORNER (90, 180) glEnd ();
-    glTranslatef (-border, -(height + border), 0.0f);
-
-    glTranslatef (width + border, height + border, 0.0f);
-    glBegin (GL_TRIANGLES);
-    CORNER (0, 90) glEnd ();
-    glTranslatef (-(width + border), -(height + border), 0.0f);
-
-    glPopMatrix ();
-
-#undef CORNER
-
-    glTexEnvf (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    glColor4f (1.0, 1.0, 1.0, 1.0);*/
-
-    enableTexture (s, &as->textTexture,COMP_TEXTURE_FILTER_GOOD);
-
-    CompMatrix *m = &as->textTexture.matrix;
-
-    glBegin (GL_QUADS);
-
-    glTexCoord2f (COMP_TEX_COORD_X (m, 0), COMP_TEX_COORD_Y (m ,0));
-    glVertex2f (x, y - height);
-    glTexCoord2f (COMP_TEX_COORD_X (m, 0), COMP_TEX_COORD_Y (m, height));
-    glVertex2f (x, y);
-    glTexCoord2f (COMP_TEX_COORD_X (m, width), COMP_TEX_COORD_Y (m, height));
-    glVertex2f (x + width, y);
-    glTexCoord2f (COMP_TEX_COORD_X (m, width), COMP_TEX_COORD_Y (m, 0));
-    glVertex2f (x + width, y - height);
-
-    glEnd ();
-
-    disableTexture (s, &as->textTexture);
-    glColor4usv (defaultColor);
-
-    if (!wasBlend)
-	glDisable (GL_BLEND);
-    glBlendFunc (oldBlendSrc, oldBlendDst);
+    (ad->textFunc->drawText) (s, as->textData, x, y, 0.7f);
 }
 
 static Bool
@@ -286,27 +181,24 @@ promptPaintOutput (CompScreen		  *s,
     Bool status;
 
     PROMPT_SCREEN (s);    
-    CompTransform sTransform = *transform;
-    
-    mask |= PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS_MASK;
+
     
     UNWRAP (as, s, paintOutput);
     status = (*s->paintOutput) (s, sAttrib, transform, region, output, mask);
     WRAP (as, s, paintOutput, promptPaintOutput);
 
+    if (as->title)
+    {
+	CompTransform sTransform = *transform;
+
 	transformToScreenSpace (s, output, -DEFAULT_Z_CAMERA, &sTransform);
 	
 	glPushMatrix ();
 	glLoadMatrixf (sTransform.m);
-	//glPopMatrix ();
-    
 
-    if (as->title)
-    {
         promptDrawTitle (s);
-
+	glPopMatrix ();
     }
-    glPopMatrix ();
 
     return status;
 } 
@@ -338,7 +230,7 @@ promptDisplayText (CompDisplay     *d,
 
         PROMPT_SCREEN (w->screen);
 
-    stringData = strdup(getStringOptionNamed (option, nOption, "string", "This message was not sent correctly"));
+    stringData = getStringOptionNamed (option, nOption, "string", "This message was not sent correctly");
 	timeout = getIntOptionNamed(option, nOption, "timeout", 5000);
 	if (timeout < 0)
 		infinite = TRUE;
@@ -369,12 +261,7 @@ promptInitScreen (CompPlugin *p,
 
     s->base.privates[ad->screenPrivateIndex].ptr = as;
 
-    initTexture (s, &as->textTexture);
-
-    as->textWidth = 0;
-    as->textHeight = 0;
-    
-    as->textPixmap = None;
+    as->textData = NULL;
 
     as->title = FALSE;
     
@@ -399,9 +286,19 @@ promptInitDisplay (CompPlugin  *p,
 		      CompDisplay *d)
 {
     WiimoteDisplay *ad;
+    int           index;
 
     if (!checkPluginABI ("core", CORE_ABIVERSION))
 	return FALSE;
+	
+    if (!checkPluginABI ("text", TEXT_ABIVERSION) ||
+	!getPluginDisplayIndex (d, "text", &index))
+    {
+	compLogMessage ("prompt", CompLogLevelWarn,
+			"No compatible text plugin found. "
+			"Prompt will now unload");
+	return FALSE;
+    }
 
     ad = malloc (sizeof (WiimoteDisplay));
     if (!ad)
@@ -414,7 +311,7 @@ promptInitDisplay (CompPlugin  *p,
 	return FALSE;
     }
 
-    d->base.privates[displayPrivateIndex].ptr = ad;
+    ad->textFunc = d->base.privates[index].ptr;
 
     promptSetDisplayTextInitiate (d, promptDisplayText);
 
