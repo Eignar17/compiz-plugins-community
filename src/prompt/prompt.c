@@ -38,10 +38,6 @@
 
 #include "prompt_options.h"
 
-#define PI 3.1415926
-#define PI2 3.14159265358979323846
-#define DEG2RAD2(DEG) ((DEG)*((PI2)/(180.0)))
-
 static int displayPrivateIndex;
 
 typedef struct _WiimoteDisplay
@@ -55,29 +51,18 @@ typedef struct _WiimoteDisplay
 
 typedef struct _WiimoteScreen
 {
-    PaintOutputProc        paintOutput;
-    int windowPrivateIndex;
+    PaintOutputProc paintOutput;
     /* text display support */
     CompTextData *textData;
-    
-    Bool title;
 
 } WiimoteScreen;
 
 #define GET_PROMPT_DISPLAY(d)                            \
-    ((WiimoteDisplay *) (d)->base.privates[displayPrivateIndex].ptr)
-#define PROMPT_DISPLAY(d)                                \
-    WiimoteDisplay *ad = GET_PROMPT_DISPLAY (d)
-#define GET_PROMPT_SCREEN(s, ad)                         \
-    ((WiimoteScreen *) (s)->base.privates[(ad)->screenPrivateIndex].ptr)
+    WiimoteDisplay *pd = GET_PROMPT_DISPLAY (d)
+#define GET_PROMPT_SCREEN(s, pd)                         \
+    ((WiimoteScreen *) (s)->base.privates[(pd)->screenPrivateIndex].ptr)
 #define PROMPT_SCREEN(s)                                 \
-    WiimoteScreen *as = GET_PROMPT_SCREEN (s, GET_PROMPT_DISPLAY (s->display))
-#define GET_PROMPT_WINDOW(w, as) \
-    ((WiimoteWindow *) (w)->base.privates[ (as)->windowPrivateIndex].ptr)
-#define PROMPT_WINDOW(w) \
-    WiimoteWindow *aw = GET_PROMPT_WINDOW (w,          \
-			  GET_PROMPT_SCREEN  (w->screen, \
-			  GET_PROMPT_DISPLAY (w->screen->display)))
+    WiimoteScreen *ps = GET_PROMPT_SCREEN (s, GET_PROMPT_DISPLAY (s->display))
 
 /* Prototyping */
 
@@ -87,26 +72,27 @@ promptFreeTitle (CompScreen *s)
     PROMPT_SCREEN(s);
     PROMPT_DISPLAY (s->display);
 
-    if (!as->textData)
+    if (!ps->textData)
 	return;
-
-    (ad->textFunc->finiTextData) (s, as->textData);
-    as->textData = NULL;
+	
+    (pd->textFunc->finiTextData) (s, ps->textData);
+    ps->textData = NULL;
 
     damageScreen (s);
 }
 
 static void 
-promptRenderTitle (CompScreen *s, char *stringData)
+promptRenderTitle (CompScreen *s,
+		   char       *stringData)
 {
     CompTextAttrib tA;
-
+    int            ox1, ox2, oy1, oy2;
+	
     PROMPT_SCREEN (s);
     PROMPT_DISPLAY (s->display);
 
-    //ringFreeWindowTitle (s);
+    promptFreeTitle (s);
 
-    int ox1, ox2, oy1, oy2;
     getCurrentOutputExtents (s, &ox1, &oy1, &ox2, &oy2);
 
     /* 75% of the output device as maximum width */
@@ -128,7 +114,7 @@ promptRenderTitle (CompScreen *s, char *stringData)
     tA.bgColor[2] = promptGetTitleBackColorBlue (s);
     tA.bgColor[3] = promptGetTitleBackColorAlpha (s);
 
-    as->textData = (ad->textFunc->renderText) (s, stringData, &tA);
+    ps->textData = (pd->textFunc->renderText) (s, stringData, &tA);
 }
 
 /* Stolen from ring.c */
@@ -136,22 +122,21 @@ promptRenderTitle (CompScreen *s, char *stringData)
 static void
 promptDrawTitle (CompScreen *s)
 {
-    PROMPT_SCREEN(s);
+    int   ox1, ox2, oy1, oy2;
+    float x, y, width, height;
+
+    PROMPT_SCREEN (s);
     PROMPT_DISPLAY (s->display);
 
-    float width = as->textData->width;
-    float height = as->textData->height;
+    width = ps->textData->width;
+    height = ps->textData->height;
 
-    int ox1, ox2, oy1, oy2;
     getCurrentOutputExtents (s, &ox1, &oy1, &ox2, &oy2);
 
-    float x = ox1 + ((ox2 - ox1) / 2) - (width / 2);
-    float y = oy1 + ((oy2 - oy1) / 2) + (height / 2);
+    x = floor (ox1 + ((ox2 - ox1) / 2) - (width / 2));
+    y = floor (oy1 + ((oy2 - oy1) / 2) + (height / 2));
 
-    x = floor (x);
-    y = floor (y);
-
-    (ad->textFunc->drawText) (s, as->textData, x, y, 0.7f);
+    (pd->textFunc->drawText) (s, ps->textData, x, y, 0.7f);
 }
 
 static Bool
@@ -159,11 +144,11 @@ promptRemoveTitle (void *vs)
 {
     CompScreen *s = (CompScreen *) vs;
 
-    PROMPT_SCREEN (s);
-    
-    as->title = FALSE;
+    PROMPT_DISPLAY (s->display);
 
     promptFreeTitle (s);
+	
+    pd->removeTextHandle = 0;
 
     return FALSE;
 }
@@ -171,23 +156,23 @@ promptRemoveTitle (void *vs)
 /* Paint title on screen if neccessary */
  
 static Bool
-promptPaintOutput (CompScreen		  *s,
-		 const ScreenPaintAttrib *sAttrib,
-		 const CompTransform	  *transform,
-		 Region		          region,
-		 CompOutput		  *output,
-		 unsigned int		  mask)
+promptPaintOutput (CompScreen		   *s,
+		   const ScreenPaintAttrib *sAttrib,
+		   const CompTransform	   *transform,
+		   Region		   region,
+		   CompOutput		   *output,
+		   unsigned int		   mask)
 {
     Bool status;
 
     PROMPT_SCREEN (s);    
 
     
-    UNWRAP (as, s, paintOutput);
+    UNWRAP (ps, s, paintOutput);
     status = (*s->paintOutput) (s, sAttrib, transform, region, output, mask);
-    WRAP (as, s, paintOutput, promptPaintOutput);
+    WRAP (ps, s, paintOutput, promptPaintOutput);
 
-    if (as->title)
+    if (ps->textData)
     {
 	CompTransform sTransform = *transform;
 
@@ -207,40 +192,42 @@ promptPaintOutput (CompScreen		  *s,
 
 static Bool
 promptDisplayText (CompDisplay     *d,
-		 CompAction      *action,
-		 CompActionState cstate,
-		 CompOption      *option,
-		 int             nOption)
+		   CompAction      *action,
+		   CompActionState state,
+		   CompOption      *option,
+		   int             nOption)
 {
-	char *stringData;
-	int timeout;
-	Bool infinite = FALSE;
+    Window     xid;
+    CompScreen *s;
 
-	CompWindow *w;
-    	w = findWindowAtDisplay (d, getIntOptionNamed (option, nOption,
-    							       "window", 0));
-	if (!w) 
-	    return TRUE;
+    xid = getIntOptionNamed (option, nOption, "root", 0);
+    s   = findScreenAtDisplay (d, xid);
+    if (s)
+    {
+        char *stringData;
+	int  timeout;
 
-	CompScreen *s;
-    	s = findScreenAtDisplay (d, getIntOptionNamed (option, nOption,
-    							       "root", 0));
-	if (!s)
-	    return TRUE;
+	stringData = getStringOptionNamed (option, nOption, "string",
+					   "This message was not"
+					   "sent correctly");
 
-        PROMPT_SCREEN (w->screen);
+	timeout = getIntOptionNamed (option, nOption, "timeout", 5000);
 
-    stringData = getStringOptionNamed (option, nOption, "string", "This message was not sent correctly");
-	timeout = getIntOptionNamed(option, nOption, "timeout", 5000);
-	if (timeout < 0)
-		infinite = TRUE;
+	/* Create Message */
+	promptRenderTitle (s, stringData);
 
-    /* Create Message */
-    as->title = TRUE;
-	promptRenderTitle (w->screen, stringData);
-	if (!infinite)
-		compAddTimeout (timeout, timeout * 1.2, promptRemoveTitle, s);
-    damageScreen (s);
+	if (timeout > 0)
+	{
+	    PROMPT_DISPLAY (s->display);
+
+	    if (pd->removeTextHandle)
+		compRemoveTimeout (pd->removeTextHandle);
+	    pd->removeTextHandle = compAddTimeout (timeout, timeout * 1.2,
+						   promptRemoveTitle, s);
+	}
+
+	damageScreen (s);
+    }
 	
     return TRUE;
 }
@@ -249,43 +236,41 @@ promptDisplayText (CompDisplay     *d,
 
 static Bool
 promptInitScreen (CompPlugin *p,
-		     CompScreen *s)
+		  CompScreen *s)
 {
-    WiimoteScreen *as;
+    WiimoteScreen *ps;
 
     PROMPT_DISPLAY (s->display);
 
-    as = malloc (sizeof (WiimoteScreen));
-    if (!as)
+    ps = malloc (sizeof (WiimoteScreen));
+    if (!ps)
 	return FALSE;
+	
+    s->base.privates[pd->screenPrivateIndex].ptr = ps;
 
-    s->base.privates[ad->screenPrivateIndex].ptr = as;
-
-    as->textData = NULL;
-
-    as->title = FALSE;
+    ps->textData = NULL;
     
-    WRAP (as, s, paintOutput, promptPaintOutput); 
+    WRAP (ps, s, paintOutput, promptPaintOutput);  
 
     return TRUE;
 }
 
 static void
 promptFiniScreen (CompPlugin *p,
-		     CompScreen *s)
+		  CompScreen *s)
 {
     PROMPT_SCREEN (s);
+	
+    UNWRAP (ps, s, paintOutput);
 
-    UNWRAP (as, s, paintOutput);
-
-    free (as);
+    free (ps);
 }
 
 static Bool
 promptInitDisplay (CompPlugin  *p,
-		      CompDisplay *d)
+		   CompDisplay *d)
 {
-    WiimoteDisplay *ad;
+    WiimoteDisplay *pd;
     int           index;
 
     if (!checkPluginABI ("core", CORE_ABIVERSION))
@@ -299,9 +284,13 @@ promptInitDisplay (CompPlugin  *p,
 			"Prompt will now unload");
 	return FALSE;
     }
+    pd = malloc (sizeof (WiimoteDisplay));
+    if (!pd)
+ 	return FALSE;
 
-    ad = malloc (sizeof (WiimoteDisplay));
-    if (!ad)
+    pd->screenPrivateIndex = allocateScreenPrivateIndex (d);
+    if (pd->screenPrivateIndex < 0)
+	free (pd);
 	return FALSE;
 
     ad->screenPrivateIndex = allocateScreenPrivateIndex (d);
@@ -311,7 +300,8 @@ promptInitDisplay (CompPlugin  *p,
 	return FALSE;
     }
 
-    ad->textFunc = d->base.privates[index].ptr;
+    d->base.privates[displayPrivateIndex].ptr = pd;
+    pd->textFunc = d->base.privates[index].ptr;
 
     promptSetDisplayTextInitiate (d, promptDisplayText);
 
@@ -320,17 +310,20 @@ promptInitDisplay (CompPlugin  *p,
 
 static void
 promptFiniDisplay (CompPlugin  *p,
-		      CompDisplay *d)
+		   CompDisplay *d)
 {
     PROMPT_DISPLAY (d);
 
-    freeScreenPrivateIndex (d, ad->screenPrivateIndex);
-    free (ad);
+    if (pd->removeTextHandle)
+	compRemoveTimeout (pd->removeTextHandle);
+
+    freeScreenPrivateIndex (d, pd->screenPrivateIndex);
+    free (pd);
 }
 
 static CompBool
 promptInitObject (CompPlugin *p,
-		     CompObject *o)
+		  CompObject *o)
 {
     static InitPluginObjectProc dispTab[] = {
 	(InitPluginObjectProc) 0,
@@ -343,7 +336,7 @@ promptInitObject (CompPlugin *p,
 
 static void
 promptFiniObject (CompPlugin *p,
-		     CompObject *o)
+		  CompObject *o)
 {
     static FiniPluginObjectProc dispTab[] = {
 	(FiniPluginObjectProc) 0,
